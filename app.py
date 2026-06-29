@@ -147,13 +147,16 @@ def _stats_md(data: dict) -> str:
 
 # ── Streaming chat function ─────────────────────────────────────────────────
 
-def respond(message: str, history: list, api_key_input: str):
+def respond(message: str, display_history: list, api_history: list, api_key_input: str):
     """
     Generator — streams agent steps to the Gradio Chatbot.
-    Uses Gradio 6 messages format: [{"role": "user/assistant", "content": "..."}]
+
+    Two separate histories:
+      display_history — what the chatbot shows (includes tool call blocks, emojis)
+      api_history     — clean Q&A pairs sent to the LLM for multi-turn context
     """
     if not message.strip():
-        yield history, history, _stats_md({}), ""
+        yield display_history, display_history, api_history, _stats_md({}), ""
         return
 
     api_key = ENV_KEY or api_key_input.strip()
@@ -162,24 +165,24 @@ def respond(message: str, history: list, api_key_input: str):
             "❌ **No API key configured.**\n\n"
             "Enter your **GROQ API Key** in the sidebar (free at [console.groq.com](https://console.groq.com))."
         )
-        new_hist = history + [
+        new_disp = display_history + [
             {"role": "user",      "content": message},
             {"role": "assistant", "content": err},
         ]
-        yield new_hist, new_hist, _stats_md({}), ""
+        yield new_disp, new_disp, api_history, _stats_md({}), ""
         return
 
-    # Append user message + loading placeholder
-    working_history = history + [
+    # Append user message + loading placeholder to display history
+    working = display_history + [
         {"role": "user",      "content": message},
         {"role": "assistant", "content": "⏳ *Analyzing your question...*"},
     ]
-    yield working_history, history, "⏳ Running...", ""
+    yield working, display_history, api_history, "⏳ Running...", ""
 
     tool_lines: list[str] = []
 
     try:
-        for step in agent_stream(message, api_key):
+        for step in agent_stream(message, api_key, conversation_history=api_history):
 
             if step["type"] == "tool_start":
                 tool    = step["tool"]
@@ -189,19 +192,19 @@ def respond(message: str, history: list, api_key_input: str):
                 line = f"> {emoji} **{label}** {preview}  \n> ⏳ *Fetching...*"
                 tool_lines.append(line)
                 partial = "🤔 *Reasoning with tools...*\n\n" + "\n\n".join(tool_lines)
-                working_history[-1] = {"role": "assistant", "content": partial}
-                yield working_history, history, "⏳ Running...", ""
+                working[-1] = {"role": "assistant", "content": partial}
+                yield working, display_history, api_history, "⏳ Running...", ""
 
             elif step["type"] == "tool_result":
                 tool    = step["tool"]
                 result  = step["result"]
                 preview = _result_preview(tool, result)
                 if tool_lines:
-                    base = tool_lines[-1].split("\n")[0]  # keep "emoji **label** arg" line
+                    base = tool_lines[-1].split("\n")[0]
                     tool_lines[-1] = base + f"  \n> ✅ *{preview}*"
                 partial = "🤔 *Reasoning with tools...*\n\n" + "\n\n".join(tool_lines)
-                working_history[-1] = {"role": "assistant", "content": partial}
-                yield working_history, history, "⏳ Running...", ""
+                working[-1] = {"role": "assistant", "content": partial}
+                yield working, display_history, api_history, "⏳ Running...", ""
 
             elif step["type"] == "final":
                 answer = step["answer"]
@@ -210,21 +213,27 @@ def respond(message: str, history: list, api_key_input: str):
                     final_content = f"🤔 *Reasoning with tools...*\n\n{done_section}\n\n---\n\n{answer}"
                 else:
                     final_content = answer
-                working_history[-1] = {"role": "assistant", "content": final_content}
-                saved_history = history + [
+
+                working[-1] = {"role": "assistant", "content": final_content}
+                saved_display = display_history + [
                     {"role": "user",      "content": message},
                     {"role": "assistant", "content": final_content},
                 ]
-                yield working_history, saved_history, _stats_md(step), ""
+                # Store only the clean answer (no tool blocks) for API context
+                saved_api = api_history + [
+                    {"role": "user",      "content": message},
+                    {"role": "assistant", "content": answer},
+                ]
+                yield working, saved_display, saved_api, _stats_md(step), ""
 
     except Exception as e:
         err_msg = f"❌ **Error:** {e}\n\nCheck your API key or try again."
-        working_history[-1] = {"role": "assistant", "content": err_msg}
-        yield working_history, history, _stats_md({}), ""
+        working[-1] = {"role": "assistant", "content": err_msg}
+        yield working, display_history, api_history, _stats_md({}), ""
 
 
 def clear_chat():
-    return [], [], _stats_md({}), ""
+    return [], [], [], _stats_md({}), ""
 
 
 # ── Build UI ────────────────────────────────────────────────────────────────
@@ -327,11 +336,14 @@ def build_ui() -> gr.Blocks:
 """)
 
         # ── State ────────────────────────────────────────────────────────
-        history_state = gr.State([])   # saved conversation (dict format)
+        # display_state: full chat history with tool-call blocks (for chatbot)
+        # api_state:     clean Q&A pairs only (for LLM multi-turn context)
+        display_state = gr.State([])
+        api_state     = gr.State([])
 
         # ── Events ───────────────────────────────────────────────────────
-        inputs  = [msg_box, history_state, api_key_box]
-        outputs = [chatbot, history_state, stats_md, msg_box]
+        inputs  = [msg_box, display_state, api_state, api_key_box]
+        outputs = [chatbot, display_state, api_state, stats_md, msg_box]
 
         msg_box.submit(respond, inputs, outputs)
         send_btn.click(respond, inputs, outputs)

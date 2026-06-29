@@ -59,16 +59,30 @@ def _format_arg_preview(tool: str, args: dict) -> str:
     return str(args)[:80]
 
 
-def agent_stream(user_message: str, api_key: str, max_iterations: int = 8):
+MAX_HISTORY_TURNS = 10   # keep last N Q&A pairs in context
+
+
+def agent_stream(
+    user_message: str,
+    api_key: str,
+    conversation_history: list | None = None,
+    max_iterations: int = 8,
+):
     """
     Generator: runs the ReAct loop and yields step events.
-    Each call to this function is stateless — fresh context window.
+    Pass conversation_history for multi-turn context (clean Q&A pairs only,
+    no tool-call display text).
     """
     client = Groq(api_key=api_key)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user",   "content": user_message},
-    ]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    # Inject previous turns so the LLM has context from prior messages
+    if conversation_history:
+        # Trim to avoid exceeding context window
+        recent = conversation_history[-(MAX_HISTORY_TURNS * 2):]
+        messages.extend(recent)
+
+    messages.append({"role": "user", "content": user_message})
 
     start_time = time.time()
     steps = []
