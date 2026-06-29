@@ -7,7 +7,7 @@ sdk: gradio
 sdk_version: "6.19.0"
 app_file: app.py
 pinned: true
-short_description: ReAct agent with live web search, math, and Wikipedia — chat UI
+short_description: ReAct agent · web search · math · Wikipedia · chat UI
 ---
 
 # 🤖 Advanced AI Research Agent
