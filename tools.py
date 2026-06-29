@@ -1,5 +1,7 @@
 import math
 import datetime
+import json
+import re
 import requests
 from ddgs import DDGS
 
@@ -31,6 +33,60 @@ def calculate(expression: str) -> str:
 
 def get_current_date() -> str:
     return datetime.datetime.now().strftime("%A, %B %d, %Y — %H:%M:%S UTC+0")
+
+
+def fetch_url(url: str, max_chars: int = 4000) -> str:
+    """Fetch any public URL and return readable content. Handles HTML, JSON, plain text."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; AI-Research-Agent/2.0)",
+            "Accept": "text/html,application/json,*/*",
+        }
+        resp = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
+
+        if not resp.ok:
+            return f"HTTP {resp.status_code}: Could not fetch {url}"
+
+        ctype = resp.headers.get("content-type", "")
+
+        # JSON (GitHub API, REST endpoints)
+        if "json" in ctype or url.rstrip("/").endswith((".json", "repos", "events")):
+            try:
+                data = resp.json()
+                if isinstance(data, list):
+                    rows = []
+                    for i, item in enumerate(data[:40], 1):
+                        if isinstance(item, dict):
+                            name  = item.get("name") or item.get("full_name", "")
+                            desc  = item.get("description") or ""
+                            lang  = item.get("language") or ""
+                            stars = item.get("stargazers_count", "")
+                            updated = (item.get("updated_at") or "")[:10]
+                            rows.append(f"[{i}] {name}  lang={lang}  ★{stars}  updated={updated}\n    {desc}")
+                        else:
+                            rows.append(f"[{i}] {str(item)[:120]}")
+                    return f"{len(data)} items found:\n\n" + "\n\n".join(rows)
+                return json.dumps(data, indent=2)[:max_chars]
+            except Exception:
+                pass  # fall through to plain text
+
+        # HTML — strip tags without extra dependencies
+        if "html" in ctype:
+            text = resp.text
+            text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r"<style[^>]*>.*?</style>",  " ", text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r"<[^>]+>", " ", text)
+            for ent, char in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+                               ("&nbsp;", " "), ("&#39;", "'"), ("&quot;", '"')]:
+                text = text.replace(ent, char)
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            return "\n".join(lines[:120])[:max_chars]
+
+        # Plain text / everything else
+        return resp.text[:max_chars]
+
+    except Exception as e:
+        return f"Error fetching {url}: {e}"
 
 
 def wikipedia_search(topic: str) -> str:
@@ -109,6 +165,29 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_url",
+            "description": (
+                "Fetch the actual content of any public URL: web pages, GitHub profiles/repos, "
+                "APIs, documentation, news articles. Use this when you need the FULL content "
+                "of a specific page rather than a search snippet. "
+                "For GitHub repos list use: https://api.github.com/users/{username}/repos?per_page=100 "
+                "For a GitHub profile page use: https://github.com/{username}"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full URL to fetch (must start with http:// or https://)"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "wikipedia_search",
             "description": (
                 "Look up a concept, person, place, technology, or scientific topic on Wikipedia. "
@@ -130,17 +209,19 @@ TOOL_SCHEMAS = [
 ]
 
 TOOL_REGISTRY = {
-    "web_search": web_search,
-    "calculate": calculate,
+    "web_search":       web_search,
+    "calculate":        calculate,
     "get_current_date": get_current_date,
+    "fetch_url":        fetch_url,
     "wikipedia_search": wikipedia_search,
 }
 
 TOOL_META = {
-    "web_search":      {"emoji": "🔍", "label": "Web Search"},
-    "calculate":       {"emoji": "🧮", "label": "Calculator"},
-    "get_current_date":{"emoji": "📅", "label": "Date & Time"},
-    "wikipedia_search":{"emoji": "📖", "label": "Wikipedia"},
+    "web_search":       {"emoji": "🔍", "label": "Web Search"},
+    "calculate":        {"emoji": "🧮", "label": "Calculator"},
+    "get_current_date": {"emoji": "📅", "label": "Date & Time"},
+    "fetch_url":        {"emoji": "🌐", "label": "Fetch URL"},
+    "wikipedia_search": {"emoji": "📖", "label": "Wikipedia"},
 }
 
 

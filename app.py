@@ -29,10 +29,11 @@ EXAMPLES = [
 ]
 
 TOOL_CARDS = [
-    ("🔍", "Web Search",   "Live DuckDuckGo search — current news, prices, job info, events."),
-    ("🧮", "Calculator",   "Evaluates math exactly: arithmetic, sqrt, compound interest, etc."),
-    ("📅", "Date & Time",  "Returns current date/time — for time-sensitive queries."),
-    ("📖", "Wikipedia",    "Looks up definitions, history, and technical concepts."),
+    ("🔍", "Web Search",  "Live DuckDuckGo search — current news, prices, job info, events."),
+    ("🧮", "Calculator",  "Evaluates math exactly: arithmetic, sqrt, compound interest, etc."),
+    ("📅", "Date & Time", "Returns current date/time — for time-sensitive queries."),
+    ("🌐", "Fetch URL",   "Reads any public URL: GitHub profiles, APIs, news articles, docs."),
+    ("📖", "Wikipedia",   "Looks up definitions, history, and technical concepts."),
 ]
 
 CSS = """
